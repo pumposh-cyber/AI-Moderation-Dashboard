@@ -31,29 +31,17 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    try:
-        # Check database connectivity
-        with database.get_db_connection() as conn:
-            conn.cursor().execute("SELECT 1")
-        
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "status": "healthy",
-                "database": "connected",
-                "environment": settings.environment
-            }
-        )
-    except Exception as e:
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={
-                "status": "unhealthy",
-                "database": "disconnected",
-                "error": str(e)
-            }
-        )
+    """Health check endpoint - lightweight check without database."""
+    # Simple health check that doesn't require database
+    # Railway uses this to verify the service is up
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "status": "healthy",
+            "service": "moderation-dashboard",
+            "environment": settings.environment
+        }
+    )
 
 
 @router.get("/ready")

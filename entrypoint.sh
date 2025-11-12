@@ -1,9 +1,10 @@
 #!/bin/sh
 # Entrypoint script that handles PORT environment variable
-set -e
 
 # Default to port 8000 if PORT is not set
 PORT=${PORT:-8000}
+
+echo "Starting application on port ${PORT}"
 
 # Run Gunicorn with the correct port
 exec gunicorn backend.main:app \

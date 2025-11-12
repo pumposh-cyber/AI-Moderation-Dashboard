@@ -41,13 +41,13 @@ structlog.configure(
 logger = structlog.get_logger()
 settings = get_settings()
 
-# Initialize database
+# Initialize database (non-blocking - will retry on first use)
 try:
     database.init_db()
     logger.info("Database initialized successfully")
 except Exception as e:
-    logger.error("Failed to initialize database", error=str(e))
-    raise
+    logger.warning("Database initialization failed, will retry on first use", error=str(e))
+    # Don't raise - allow app to start even if DB is temporarily unavailable
 
 # Create FastAPI app
 app = FastAPI(
