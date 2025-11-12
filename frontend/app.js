@@ -17,15 +17,23 @@ async function initClerk() {
     }
 
     try {
-        // Wait for Clerk to be available
+        // Wait for Clerk to be available (it loads asynchronously)
+        let retries = 0;
+        while (typeof window.Clerk === 'undefined' && retries < 10) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            retries++;
+        }
+
         if (typeof window.Clerk === 'undefined') {
-            console.error('Clerk SDK not loaded');
+            console.error('Clerk SDK not loaded after timeout');
             showAuthError();
             return;
         }
 
+        // Initialize Clerk
         clerk = new window.Clerk(CLERK_PUBLISHABLE_KEY);
         
+        // Load Clerk and wait for it to be ready
         await clerk.load();
         
         // Set up auth state listener
@@ -109,7 +117,25 @@ async function getAuthHeader() {
     }
     
     try {
-        const token = await clerk.session?.getToken();
+        // Get the session token from Clerk
+        let token = null;
+        
+        // Try different methods to get token (Clerk SDK API may vary)
+        if (clerk.session) {
+            if (typeof clerk.session.getToken === 'function') {
+                token = await clerk.session.getToken();
+            } else if (clerk.session.token) {
+                token = clerk.session.token;
+            }
+        }
+        
+        // Alternative: try getting token directly from user
+        if (!token && clerk.user) {
+            if (typeof clerk.user.getToken === 'function') {
+                token = await clerk.user.getToken();
+            }
+        }
+        
         if (token) {
             return {
                 'Authorization': `Bearer ${token}`
