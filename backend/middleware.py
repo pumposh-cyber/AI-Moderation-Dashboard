@@ -27,8 +27,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if settings.is_production:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
-                "script-src 'self' https://cdn.tailwindcss.com; "
-                "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com;"
+                "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.clerk.com https://*.clerk.accounts.dev https://*.clerk.com; "
+                "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://*.clerk.accounts.dev https://*.clerk.com; "
+                "connect-src 'self' https://*.clerk.accounts.dev https://*.clerk.com; "
+                "img-src 'self' data: https:;"
             )
         
         return response

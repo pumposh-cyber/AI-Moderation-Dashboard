@@ -111,7 +111,10 @@ async def root():
         
         # Replace placeholder with actual Clerk key if available
         clerk_key = settings.clerk_publishable_key or ""
+        # Replace the placeholder - handle both single and double quotes
         html_content = html_content.replace("'{{CLERK_PUBLISHABLE_KEY}}'", f"'{clerk_key}'")
+        html_content = html_content.replace('"{{CLERK_PUBLISHABLE_KEY}}"', f'"{clerk_key}"')
+        html_content = html_content.replace("{{CLERK_PUBLISHABLE_KEY}}", clerk_key)
         
         from fastapi.responses import HTMLResponse
         return HTMLResponse(content=html_content)

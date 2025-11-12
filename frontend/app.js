@@ -1,5 +1,4 @@
-// Clerk Configuration
-const CLERK_PUBLISHABLE_KEY = window.CLERK_PUBLISHABLE_KEY || '';
+// Clerk Configuration - will be set from window object after HTML loads
 
 // API base URL
 const API_BASE = '/api';
@@ -9,8 +8,12 @@ let clerk = null;
 
 // Initialize Clerk when script loads
 async function initClerk() {
-    if (!CLERK_PUBLISHABLE_KEY) {
+    // Get Clerk key from window object (set in index.html)
+    const CLERK_PUBLISHABLE_KEY = window.CLERK_PUBLISHABLE_KEY || '';
+    
+    if (!CLERK_PUBLISHABLE_KEY || CLERK_PUBLISHABLE_KEY === '{{CLERK_PUBLISHABLE_KEY}}' || CLERK_PUBLISHABLE_KEY === '') {
         console.warn('CLERK_PUBLISHABLE_KEY not set. Authentication disabled.');
+        console.warn('Current value:', CLERK_PUBLISHABLE_KEY);
         // Show dashboard without auth for development
         showDashboard();
         return;
@@ -30,14 +33,19 @@ async function initClerk() {
             return;
         }
 
-        // Initialize Clerk
-        clerk = new window.Clerk(CLERK_PUBLISHABLE_KEY);
+        // Initialize Clerk with the key
+        const clerkKey = window.CLERK_PUBLISHABLE_KEY;
+        
+        // Clerk SDK from cdn.clerk.com/clerk.js exposes Clerk as a constructor
+        // Initialize Clerk instance
+        clerk = new window.Clerk(clerkKey);
         
         // Load Clerk and wait for it to be ready
         await clerk.load();
         
         // Set up auth state listener
         clerk.addListener((state) => {
+            console.log('Clerk auth state changed:', state);
             if (state.user) {
                 showDashboard();
             } else {
@@ -46,7 +54,8 @@ async function initClerk() {
         });
 
         // Check initial auth state
-        if (clerk.user) {
+        const currentUser = await clerk.user;
+        if (currentUser) {
             showDashboard();
         } else {
             showSignIn();
@@ -112,29 +121,20 @@ function showAuthError() {
 
 // Get authorization header for API requests
 async function getAuthHeader() {
-    if (!clerk || !clerk.user) {
+    if (!clerk) {
         return {};
     }
     
     try {
         // Get the session token from Clerk
-        let token = null;
-        
-        // Try different methods to get token (Clerk SDK API may vary)
-        if (clerk.session) {
-            if (typeof clerk.session.getToken === 'function') {
-                token = await clerk.session.getToken();
-            } else if (clerk.session.token) {
-                token = clerk.session.token;
-            }
+        // Clerk SDK provides getToken() method on the session
+        const session = await clerk.session;
+        if (!session) {
+            return {};
         }
         
-        // Alternative: try getting token directly from user
-        if (!token && clerk.user) {
-            if (typeof clerk.user.getToken === 'function') {
-                token = await clerk.user.getToken();
-            }
-        }
+        // Get token using Clerk's getToken method
+        const token = await session.getToken();
         
         if (token) {
             return {
@@ -162,8 +162,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Set up sign out button
     document.getElementById('sign-out-btn')?.addEventListener('click', async () => {
         if (clerk) {
-            await clerk.signOut();
-            showSignIn();
+            try {
+                await clerk.signOut();
+                showSignIn();
+            } catch (error) {
+                console.error('Error signing out:', error);
+                // Force reload on error
+                window.location.reload();
+            }
         }
     });
 });
