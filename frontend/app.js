@@ -22,21 +22,24 @@ async function initClerk() {
     try {
         // Wait for Clerk to be available (it loads asynchronously)
         let retries = 0;
-        while (typeof window.Clerk === 'undefined' && retries < 10) {
-            await new Promise(resolve => setTimeout(resolve, 100));
+        while (typeof window.Clerk === 'undefined' && retries < 20) {
+            await new Promise(resolve => setTimeout(resolve, 200));
             retries++;
         }
 
         if (typeof window.Clerk === 'undefined') {
             console.error('Clerk SDK not loaded after timeout');
-            showAuthError();
+            console.error('window.Clerk:', typeof window.Clerk);
+            // Show dashboard without auth if Clerk fails to load
+            console.warn('Falling back to unauthenticated mode');
+            showDashboard();
             return;
         }
 
         // Initialize Clerk with the key
         const clerkKey = window.CLERK_PUBLISHABLE_KEY;
         
-        // Clerk SDK from cdn.clerk.com/clerk.js exposes Clerk as a constructor
+        // Clerk SDK from @clerk/clerk-js exposes Clerk as a constructor
         // Initialize Clerk instance
         clerk = new window.Clerk(clerkKey);
         
@@ -62,7 +65,9 @@ async function initClerk() {
         }
     } catch (error) {
         console.error('Error initializing Clerk:', error);
-        showAuthError();
+        // Show dashboard without auth on error
+        console.warn('Falling back to unauthenticated mode due to error');
+        showDashboard();
     }
 }
 
@@ -157,6 +162,18 @@ function escapeHtml(text) {
 
 // Load flags and stats on page load
 document.addEventListener('DOMContentLoaded', () => {
+    // Show loading state initially
+    const dashboardContainer = document.getElementById('dashboard-container');
+    const authContainer = document.getElementById('clerk-auth-container');
+    
+    if (dashboardContainer) {
+        dashboardContainer.classList.remove('hidden');
+    }
+    if (authContainer) {
+        authContainer.classList.add('hidden');
+    }
+    
+    // Initialize Clerk (will handle auth if available)
     initClerk();
     
     // Set up sign out button
@@ -170,6 +187,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Force reload on error
                 window.location.reload();
             }
+        } else {
+            // If no Clerk, just reload
+            window.location.reload();
         }
     });
 });
