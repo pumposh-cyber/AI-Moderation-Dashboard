@@ -85,6 +85,7 @@ def init_db() -> None:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS flagged_items (
                     id SERIAL PRIMARY KEY,
+                    user_id VARCHAR(255) NOT NULL,
                     content_type VARCHAR(20) NOT NULL CHECK(content_type IN ('message', 'image', 'report')),
                     content TEXT NOT NULL,
                     priority VARCHAR(10) NOT NULL CHECK(priority IN ('high', 'medium', 'low')),
@@ -96,6 +97,9 @@ def init_db() -> None:
             """)
             
             # Create indexes
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_user_id ON flagged_items(user_id)
+            """)
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_priority ON flagged_items(priority)
             """)
@@ -110,6 +114,7 @@ def init_db() -> None:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS flagged_items (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
                     content_type TEXT NOT NULL CHECK(content_type IN ('message', 'image', 'report')),
                     content TEXT NOT NULL,
                     priority TEXT NOT NULL CHECK(priority IN ('high', 'medium', 'low')),
@@ -121,6 +126,9 @@ def init_db() -> None:
             """)
             
             # Create indexes
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_user_id ON flagged_items(user_id)
+            """)
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_priority ON flagged_items(priority)
             """)
@@ -135,107 +143,121 @@ def init_db() -> None:
         logger.info("Database initialized successfully")
 
 
-def get_flag_by_id(flag_id: int) -> Optional[dict]:
-    """Get a flagged item by ID."""
+def get_flag_by_id(flag_id: int, user_id: str) -> Optional[dict]:
+    """Get a flagged item by ID for a specific user."""
     with get_db_connection() as conn:
         if _is_postgres:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute("SELECT * FROM flagged_items WHERE id = %s", (flag_id,))
+            cursor.execute("SELECT * FROM flagged_items WHERE id = %s AND user_id = %s", (flag_id, user_id))
             row = cursor.fetchone()
             return dict(row) if row else None
         else:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM flagged_items WHERE id = ?", (flag_id,))
+            cursor.execute("SELECT * FROM flagged_items WHERE id = ? AND user_id = ?", (flag_id, user_id))
             row = cursor.fetchone()
             return dict(row) if row else None
 
 
-def get_all_flags() -> List[dict]:
-    """Get all flagged items."""
+def get_all_flags(user_id: str) -> List[dict]:
+    """Get all flagged items for a specific user."""
     with get_db_connection() as conn:
         if _is_postgres:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
         else:
             cursor = conn.cursor()
-        cursor.execute("SELECT * FROM flagged_items ORDER BY created_at DESC")
+        cursor.execute("SELECT * FROM flagged_items WHERE user_id = %s ORDER BY created_at DESC" if _is_postgres else "SELECT * FROM flagged_items WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
 
-def create_flag(content_type: str, content: str, priority: str, ai_summary: str) -> int:
-    """Create a new flagged item and return its ID."""
+def create_flag(user_id: str, content_type: str, content: str, priority: str, ai_summary: str) -> int:
+    """Create a new flagged item for a user and return its ID."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         if _is_postgres:
             cursor.execute("""
-                INSERT INTO flagged_items (content_type, content, priority, status, ai_summary)
-                VALUES (%s, %s, %s, 'pending', %s)
+                INSERT INTO flagged_items (user_id, content_type, content, priority, status, ai_summary)
+                VALUES (%s, %s, %s, %s, 'pending', %s)
                 RETURNING id
-            """, (content_type, content, priority, ai_summary))
+            """, (user_id, content_type, content, priority, ai_summary))
             flag_id = cursor.fetchone()[0]
         else:
             cursor.execute("""
-                INSERT INTO flagged_items (content_type, content, priority, status, ai_summary)
-                VALUES (?, ?, ?, 'pending', ?)
-            """, (content_type, content, priority, ai_summary))
+                INSERT INTO flagged_items (user_id, content_type, content, priority, status, ai_summary)
+                VALUES (?, ?, ?, ?, 'pending', ?)
+            """, (user_id, content_type, content, priority, ai_summary))
             flag_id = cursor.lastrowid
         conn.commit()
         return flag_id
 
 
-def update_flag_status(flag_id: int, status: str) -> bool:
-    """Update the status of a flagged item."""
+def update_flag_status(flag_id: int, user_id: str, status: str) -> bool:
+    """Update the status of a flagged item for a specific user."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         if _is_postgres:
             cursor.execute("""
                 UPDATE flagged_items 
                 SET status = %s, updated_at = CURRENT_TIMESTAMP
-                WHERE id = %s
-            """, (status, flag_id))
+                WHERE id = %s AND user_id = %s
+            """, (status, flag_id, user_id))
         else:
             cursor.execute("""
                 UPDATE flagged_items 
                 SET status = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (status, flag_id))
+                WHERE id = ? AND user_id = ?
+            """, (status, flag_id, user_id))
         updated = cursor.rowcount > 0
         conn.commit()
         return updated
 
 
-def delete_flag(flag_id: int) -> bool:
-    """Delete a flagged item."""
+def delete_flag(flag_id: int, user_id: str) -> bool:
+    """Delete a flagged item for a specific user."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         if _is_postgres:
-            cursor.execute("DELETE FROM flagged_items WHERE id = %s", (flag_id,))
+            cursor.execute("DELETE FROM flagged_items WHERE id = %s AND user_id = %s", (flag_id, user_id))
         else:
-            cursor.execute("DELETE FROM flagged_items WHERE id = ?", (flag_id,))
+            cursor.execute("DELETE FROM flagged_items WHERE id = ? AND user_id = ?", (flag_id, user_id))
         deleted = cursor.rowcount > 0
         conn.commit()
         return deleted
 
 
-def get_stats() -> dict:
-    """Get statistics using SQL aggregation for better performance."""
+def get_stats(user_id: str) -> dict:
+    """Get statistics for a specific user using SQL aggregation."""
     with get_db_connection() as conn:
         if _is_postgres:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total_flags,
+                    COALESCE(SUM(CASE WHEN priority = 'high' THEN 1 ELSE 0 END), 0) as high_priority,
+                    COALESCE(SUM(CASE WHEN priority = 'medium' THEN 1 ELSE 0 END), 0) as medium_priority,
+                    COALESCE(SUM(CASE WHEN priority = 'low' THEN 1 ELSE 0 END), 0) as low_priority,
+                    COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) as pending_status,
+                    COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END), 0) as approved_status,
+                    COALESCE(SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END), 0) as rejected_status,
+                    COALESCE(SUM(CASE WHEN status = 'escalated' THEN 1 ELSE 0 END), 0) as escalated_status
+                FROM flagged_items
+                WHERE user_id = %s
+            """, (user_id,))
         else:
             cursor = conn.cursor()
-        cursor.execute("""
-            SELECT 
-                COUNT(*) as total_flags,
-                COALESCE(SUM(CASE WHEN priority = 'high' THEN 1 ELSE 0 END), 0) as high_priority,
-                COALESCE(SUM(CASE WHEN priority = 'medium' THEN 1 ELSE 0 END), 0) as medium_priority,
-                COALESCE(SUM(CASE WHEN priority = 'low' THEN 1 ELSE 0 END), 0) as low_priority,
-                COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) as pending_status,
-                COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END), 0) as approved_status,
-                COALESCE(SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END), 0) as rejected_status,
-                COALESCE(SUM(CASE WHEN status = 'escalated' THEN 1 ELSE 0 END), 0) as escalated_status
-            FROM flagged_items
-        """)
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total_flags,
+                    COALESCE(SUM(CASE WHEN priority = 'high' THEN 1 ELSE 0 END), 0) as high_priority,
+                    COALESCE(SUM(CASE WHEN priority = 'medium' THEN 1 ELSE 0 END), 0) as medium_priority,
+                    COALESCE(SUM(CASE WHEN priority = 'low' THEN 1 ELSE 0 END), 0) as low_priority,
+                    COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) as pending_status,
+                    COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END), 0) as approved_status,
+                    COALESCE(SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END), 0) as rejected_status,
+                    COALESCE(SUM(CASE WHEN status = 'escalated' THEN 1 ELSE 0 END), 0) as escalated_status
+                FROM flagged_items
+                WHERE user_id = ?
+            """, (user_id,))
         row = cursor.fetchone()
         if row:
             result = dict(row)

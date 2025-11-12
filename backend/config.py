@@ -36,6 +36,11 @@ class Settings:
         # Monitoring
         self.sentry_dsn: str = os.getenv("SENTRY_DSN", "")
         self.prometheus_enabled: bool = os.getenv("PROMETHEUS_ENABLED", "true").lower() == "true"
+        
+        # Clerk Authentication
+        self.clerk_secret_key: str = os.getenv("CLERK_SECRET_KEY", "")
+        self.clerk_publishable_key: str = os.getenv("CLERK_PUBLISHABLE_KEY", "")
+        self.clerk_enabled: bool = os.getenv("CLERK_ENABLED", "false").lower() == "true"
     
     @property
     def cors_origins_list(self) -> List[str]:

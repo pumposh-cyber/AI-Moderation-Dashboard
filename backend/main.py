@@ -2,13 +2,14 @@
 import structlog
 from typing import List
 
-from fastapi import FastAPI, HTTPException, status, Request
+from fastapi import FastAPI, HTTPException, status, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from backend import database
 from backend.ai_service import ai_service
+from backend.auth import get_current_user
 from backend.config import get_settings
 from backend.middleware import SecurityHeadersMiddleware, LoggingMiddleware
 from backend.monitoring import router as monitoring_router
@@ -102,8 +103,21 @@ app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 @app.get("/")
 async def root():
-    """Serve the main dashboard page."""
-    return FileResponse("frontend/index.html")
+    """Serve the main dashboard page with Clerk key injected."""
+    try:
+        # Read HTML and inject Clerk publishable key
+        with open("frontend/index.html", "r") as f:
+            html_content = f.read()
+        
+        # Replace placeholder with actual Clerk key if available
+        clerk_key = settings.clerk_publishable_key or ""
+        html_content = html_content.replace("'{{CLERK_PUBLISHABLE_KEY}}'", f"'{clerk_key}'")
+        
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        # Fallback to FileResponse if file read fails
+        return FileResponse("frontend/index.html")
 
 
 def _row_to_response(row: dict) -> FlaggedItemResponse:
@@ -122,11 +136,11 @@ def _row_to_response(row: dict) -> FlaggedItemResponse:
 
 @app.get("/api/flags", response_model=List[FlaggedItemResponse])
 @limiter.limit(f"{settings.rate_limit_per_minute}/minute")
-async def get_flags(request: Request):
-    """Get all flagged items."""
+async def get_flags(request: Request, current_user: dict = Depends(get_current_user)):
+    """Get all flagged items for the authenticated user."""
     
     try:
-        rows = database.get_all_flags()
+        rows = database.get_all_flags(current_user["user_id"])
         return [_row_to_response(row) for row in rows]
     except Exception as e:
         logger.error("Error fetching flags", error=str(e), exc_info=True)
@@ -138,11 +152,11 @@ async def get_flags(request: Request):
 
 @app.get("/api/flags/{flag_id}", response_model=FlaggedItemResponse)
 @limiter.limit(f"{settings.rate_limit_per_minute}/minute")
-async def get_flag(flag_id: int, request: Request):
-    """Get a single flagged item by ID."""
+async def get_flag(flag_id: int, request: Request, current_user: dict = Depends(get_current_user)):
+    """Get a single flagged item by ID for the authenticated user."""
     
     try:
-        row = database.get_flag_by_id(flag_id)
+        row = database.get_flag_by_id(flag_id, current_user["user_id"])
         if not row:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -161,28 +175,29 @@ async def get_flag(flag_id: int, request: Request):
 
 @app.post("/api/flags", response_model=FlaggedItemResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit(f"{settings.rate_limit_per_minute}/minute")
-async def create_flag(item: FlaggedItemCreate, request: Request):
-    """Create a new flagged item."""
+async def create_flag(item: FlaggedItemCreate, request: Request, current_user: dict = Depends(get_current_user)):
+    """Create a new flagged item for the authenticated user."""
     
     try:
         priority = ai_service.calculate_priority(item.content)
         ai_summary = ai_service.generate_summary(item.content, item.content_type)
         
         flag_id = database.create_flag(
+            user_id=current_user["user_id"],
             content_type=item.content_type,
             content=item.content,
             priority=priority,
             ai_summary=ai_summary,
         )
         
-        row = database.get_flag_by_id(flag_id)
+        row = database.get_flag_by_id(flag_id, current_user["user_id"])
         if not row:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to retrieve created flagged item"
             )
         
-        logger.info("Flag created", flag_id=flag_id, priority=priority)
+        logger.info("Flag created", flag_id=flag_id, user_id=current_user["user_id"], priority=priority)
         return _row_to_response(row)
     except HTTPException:
         raise
@@ -196,25 +211,25 @@ async def create_flag(item: FlaggedItemCreate, request: Request):
 
 @app.patch("/api/flags/{flag_id}", response_model=FlaggedItemResponse)
 @limiter.limit(f"{settings.rate_limit_per_minute}/minute")
-async def update_flag(flag_id: int, update: FlaggedItemUpdate, request: Request):
-    """Update the status of a flagged item."""
+async def update_flag(flag_id: int, update: FlaggedItemUpdate, request: Request, current_user: dict = Depends(get_current_user)):
+    """Update the status of a flagged item for the authenticated user."""
     
     try:
-        updated = database.update_flag_status(flag_id, update.status)
+        updated = database.update_flag_status(flag_id, current_user["user_id"], update.status)
         if not updated:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Flagged item {flag_id} not found",
             )
         
-        row = database.get_flag_by_id(flag_id)
+        row = database.get_flag_by_id(flag_id, current_user["user_id"])
         if not row:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to retrieve updated flagged item"
             )
         
-        logger.info("Flag updated", flag_id=flag_id, status=update.status)
+        logger.info("Flag updated", flag_id=flag_id, user_id=current_user["user_id"], status=update.status)
         return _row_to_response(row)
     except HTTPException:
         raise
@@ -228,18 +243,18 @@ async def update_flag(flag_id: int, update: FlaggedItemUpdate, request: Request)
 
 @app.delete("/api/flags/{flag_id}", status_code=status.HTTP_204_NO_CONTENT)
 @limiter.limit(f"{settings.rate_limit_per_minute}/minute")
-async def delete_flag(flag_id: int, request: Request):
-    """Delete a flagged item."""
+async def delete_flag(flag_id: int, request: Request, current_user: dict = Depends(get_current_user)):
+    """Delete a flagged item for the authenticated user."""
     
     try:
-        deleted = database.delete_flag(flag_id)
+        deleted = database.delete_flag(flag_id, current_user["user_id"])
         if not deleted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Flagged item {flag_id} not found",
             )
         
-        logger.info("Flag deleted", flag_id=flag_id)
+        logger.info("Flag deleted", flag_id=flag_id, user_id=current_user["user_id"])
     except HTTPException:
         raise
     except Exception as e:
@@ -252,11 +267,11 @@ async def delete_flag(flag_id: int, request: Request):
 
 @app.get("/api/stats", response_model=StatsResponse)
 @limiter.limit(f"{settings.rate_limit_per_minute}/minute")
-async def get_stats(request: Request):
-    """Get dashboard statistics using optimized SQL aggregation."""
+async def get_stats(request: Request, current_user: dict = Depends(get_current_user)):
+    """Get dashboard statistics for the authenticated user."""
     
     try:
-        stats_dict = database.get_stats()
+        stats_dict = database.get_stats(current_user["user_id"])
         return StatsResponse(**stats_dict)
     except Exception as e:
         logger.error("Error fetching stats", error=str(e), exc_info=True)

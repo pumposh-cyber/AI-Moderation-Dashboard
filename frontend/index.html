@@ -3,13 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.tailwindcss.com https://*.clerk.accounts.dev https://*.clerk.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://*.clerk.accounts.dev; connect-src 'self' https://*.clerk.accounts.dev https://*.clerk.com; img-src 'self' data: https:;">
     <title>AI Moderation Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Clerk JavaScript SDK -->
+    <script src="https://cdn.clerk.com/clerk.js"></script>
 </head>
 <body class="bg-gray-50 min-h-screen">
-    <div class="container mx-auto px-4 py-8">
-        <h1 class="text-3xl font-bold text-gray-800 mb-8">AI Moderation Dashboard</h1>
+    <!-- Clerk Auth UI Container -->
+    <div id="clerk-auth-container" class="hidden"></div>
+    
+    <!-- Main Dashboard (shown when authenticated) -->
+    <div id="dashboard-container" class="container mx-auto px-4 py-8">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800">AI Moderation Dashboard</h1>
+            <div class="flex items-center gap-4">
+                <span id="user-email" class="text-sm text-gray-600"></span>
+                <button id="sign-out-btn" class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 text-sm">
+                    Sign Out
+                </button>
+            </div>
+        </div>
         
         <!-- Stats Cards -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8" id="stats-container">
@@ -84,6 +98,12 @@
         </div>
     </div>
 
+    <!-- Clerk Configuration -->
+    <script>
+        // Clerk publishable key - set via environment variable or inline
+        // In production, this should come from environment variable
+        window.CLERK_PUBLISHABLE_KEY = '{{CLERK_PUBLISHABLE_KEY}}' || '';
+    </script>
     <script src="/static/app.js"></script>
 </body>
 </html>

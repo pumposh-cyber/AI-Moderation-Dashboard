@@ -1,5 +1,126 @@
+// Clerk Configuration
+const CLERK_PUBLISHABLE_KEY = window.CLERK_PUBLISHABLE_KEY || '';
+
 // API base URL
 const API_BASE = '/api';
+
+// Clerk instance (will be initialized after Clerk loads)
+let clerk = null;
+
+// Initialize Clerk when script loads
+async function initClerk() {
+    if (!CLERK_PUBLISHABLE_KEY) {
+        console.warn('CLERK_PUBLISHABLE_KEY not set. Authentication disabled.');
+        // Show dashboard without auth for development
+        showDashboard();
+        return;
+    }
+
+    try {
+        // Wait for Clerk to be available
+        if (typeof window.Clerk === 'undefined') {
+            console.error('Clerk SDK not loaded');
+            showAuthError();
+            return;
+        }
+
+        clerk = new window.Clerk(CLERK_PUBLISHABLE_KEY);
+        
+        await clerk.load();
+        
+        // Set up auth state listener
+        clerk.addListener((state) => {
+            if (state.user) {
+                showDashboard();
+            } else {
+                showSignIn();
+            }
+        });
+
+        // Check initial auth state
+        if (clerk.user) {
+            showDashboard();
+        } else {
+            showSignIn();
+        }
+    } catch (error) {
+        console.error('Error initializing Clerk:', error);
+        showAuthError();
+    }
+}
+
+// Show sign-in UI
+function showSignIn() {
+    document.getElementById('dashboard-container').classList.add('hidden');
+    document.getElementById('clerk-auth-container').classList.remove('hidden');
+    
+    if (clerk) {
+        clerk.mountSignIn(document.getElementById('clerk-auth-container'));
+    } else {
+        document.getElementById('clerk-auth-container').innerHTML = `
+            <div class="min-h-screen flex items-center justify-center">
+                <div class="bg-white rounded-lg shadow-lg p-8 max-w-md w-full">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4">Sign In Required</h2>
+                    <p class="text-gray-600 mb-6">Please sign in to access the moderation dashboard.</p>
+                    <button onclick="location.reload()" class="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
+                        Retry
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+}
+
+// Show dashboard
+function showDashboard() {
+    document.getElementById('clerk-auth-container').classList.add('hidden');
+    document.getElementById('dashboard-container').classList.remove('hidden');
+    
+    if (clerk && clerk.user) {
+        const email = clerk.user.primaryEmailAddress?.emailAddress || 'User';
+        document.getElementById('user-email').textContent = email;
+    }
+    
+    // Load data
+    loadFlags();
+    loadStats();
+}
+
+// Show auth error
+function showAuthError() {
+    document.getElementById('dashboard-container').classList.add('hidden');
+    document.getElementById('clerk-auth-container').innerHTML = `
+        <div class="min-h-screen flex items-center justify-center">
+            <div class="bg-white rounded-lg shadow-lg p-8 max-w-md w-full">
+                <h2 class="text-2xl font-bold text-red-600 mb-4">Authentication Error</h2>
+                <p class="text-gray-600 mb-6">Unable to initialize authentication. Please check your Clerk configuration.</p>
+                <button onclick="location.reload()" class="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
+                    Retry
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+// Get authorization header for API requests
+async function getAuthHeader() {
+    if (!clerk || !clerk.user) {
+        return {};
+    }
+    
+    try {
+        const token = await clerk.session?.getToken();
+        if (token) {
+            return {
+                'Authorization': `Bearer ${token}`
+            };
+        }
+    } catch (error) {
+        console.error('Error getting auth token:', error);
+    }
+    
+    return {};
+}
 
 // Escape HTML to prevent XSS attacks
 function escapeHtml(text) {
@@ -10,26 +131,56 @@ function escapeHtml(text) {
 
 // Load flags and stats on page load
 document.addEventListener('DOMContentLoaded', () => {
-    loadFlags();
-    loadStats();
+    initClerk();
+    
+    // Set up sign out button
+    document.getElementById('sign-out-btn')?.addEventListener('click', async () => {
+        if (clerk) {
+            await clerk.signOut();
+            showSignIn();
+        }
+    });
 });
 
 // Load and display flagged items
 async function loadFlags() {
     try {
-        const response = await fetch(`${API_BASE}/flags`);
+        const authHeaders = await getAuthHeader();
+        const response = await fetch(`${API_BASE}/flags`, {
+            headers: {
+                ...authHeaders,
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        if (response.status === 401) {
+            // Unauthorized - redirect to sign in
+            if (clerk) {
+                showSignIn();
+            }
+            return;
+        }
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
         const flags = await response.json();
         renderFlags(flags);
     } catch (error) {
         console.error('Error loading flags:', error);
-        document.getElementById('flags-table-body').innerHTML = 
-            '<tr><td colspan="6" class="px-6 py-4 text-center text-red-500">Error loading flags</td></tr>';
+        const tbody = document.getElementById('flags-table-body');
+        if (tbody) {
+            tbody.innerHTML = 
+                '<tr><td colspan="6" class="px-6 py-4 text-center text-red-500">Error loading flags</td></tr>';
+        }
     }
 }
 
 // Render flags table
 function renderFlags(flags) {
     const tbody = document.getElementById('flags-table-body');
+    if (!tbody) return;
     
     if (flags.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-gray-500">No flagged items</td></tr>';
@@ -97,63 +248,109 @@ function renderFlags(flags) {
 // Load and display statistics
 async function loadStats() {
     try {
-        const response = await fetch(`${API_BASE}/stats`);
+        const authHeaders = await getAuthHeader();
+        const response = await fetch(`${API_BASE}/stats`, {
+            headers: {
+                ...authHeaders,
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        if (response.status === 401) {
+            return; // Unauthorized - will be handled by auth flow
+        }
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
         const stats = await response.json();
         
-        document.getElementById('total-flags').textContent = stats.total_flags;
-        document.getElementById('high-priority').textContent = stats.high_priority;
-        document.getElementById('pending-status').textContent = stats.pending_status;
+        const totalFlagsEl = document.getElementById('total-flags');
+        const highPriorityEl = document.getElementById('high-priority');
+        const pendingStatusEl = document.getElementById('pending-status');
+        
+        if (totalFlagsEl) totalFlagsEl.textContent = stats.total_flags;
+        if (highPriorityEl) highPriorityEl.textContent = stats.high_priority;
+        if (pendingStatusEl) pendingStatusEl.textContent = stats.pending_status;
     } catch (error) {
         console.error('Error loading stats:', error);
     }
 }
 
 // Create a new flagged item
-document.getElementById('create-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    const formData = new FormData(e.target);
-    const content_type = formData.get('content_type');
-    const content = formData.get('content');
-    
-    try {
-        const response = await fetch(`${API_BASE}/flags`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ content_type, content }),
+document.addEventListener('DOMContentLoaded', () => {
+    const createForm = document.getElementById('create-form');
+    if (createForm) {
+        createForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const content_type = formData.get('content_type');
+            const content = formData.get('content');
+            
+            try {
+                const authHeaders = await getAuthHeader();
+                const response = await fetch(`${API_BASE}/flags`, {
+                    method: 'POST',
+                    headers: {
+                        ...authHeaders,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ content_type, content }),
+                });
+                
+                if (response.status === 401) {
+                    alert('Please sign in to create flagged items');
+                    if (clerk) {
+                        showSignIn();
+                    }
+                    return;
+                }
+                
+                if (response.ok) {
+                    e.target.reset();
+                    loadFlags();
+                    loadStats();
+                } else {
+                    const error = await response.json().catch(() => ({ detail: 'Error creating flagged item' }));
+                    alert(error.detail || 'Error creating flagged item');
+                }
+            } catch (error) {
+                console.error('Error creating flag:', error);
+                alert('Error creating flagged item');
+            }
         });
-        
-        if (response.ok) {
-            e.target.reset();
-            loadFlags();
-            loadStats();
-        } else {
-            alert('Error creating flagged item');
-        }
-    } catch (error) {
-        console.error('Error creating flag:', error);
-        alert('Error creating flagged item');
     }
 });
 
 // Update flag status
 async function updateFlagStatus(id, status) {
     try {
+        const authHeaders = await getAuthHeader();
         const response = await fetch(`${API_BASE}/flags/${id}`, {
             method: 'PATCH',
             headers: {
+                ...authHeaders,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({ status }),
         });
         
+        if (response.status === 401) {
+            alert('Please sign in to update flagged items');
+            if (clerk) {
+                showSignIn();
+            }
+            return;
+        }
+        
         if (response.ok) {
             loadFlags();
             loadStats();
         } else {
-            alert('Error updating flag status');
+            const error = await response.json().catch(() => ({ detail: 'Error updating flag status' }));
+            alert(error.detail || 'Error updating flag status');
         }
     } catch (error) {
         console.error('Error updating flag:', error);
@@ -168,19 +365,31 @@ async function deleteFlag(id) {
     }
     
     try {
+        const authHeaders = await getAuthHeader();
         const response = await fetch(`${API_BASE}/flags/${id}`, {
             method: 'DELETE',
+            headers: {
+                ...authHeaders,
+            },
         });
+        
+        if (response.status === 401) {
+            alert('Please sign in to delete flagged items');
+            if (clerk) {
+                showSignIn();
+            }
+            return;
+        }
         
         if (response.ok) {
             loadFlags();
             loadStats();
         } else {
-            alert('Error deleting flagged item');
+            const error = await response.json().catch(() => ({ detail: 'Error deleting flagged item' }));
+            alert(error.detail || 'Error deleting flagged item');
         }
     } catch (error) {
         console.error('Error deleting flag:', error);
         alert('Error deleting flagged item');
     }
 }
-
