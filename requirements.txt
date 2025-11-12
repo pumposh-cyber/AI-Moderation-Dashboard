@@ -11,4 +11,5 @@ prometheus-client==0.19.0
 structlog==23.2.0
 PyJWT[crypto]==2.8.0
 cryptography==41.0.7
+# Note: PyJWKClient is included in PyJWT package, no separate install needed
 
